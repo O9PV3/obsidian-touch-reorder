@@ -38,12 +38,6 @@ class TouchReorderPlugin {
   private static readonly SCROLL_EDGE = 60;
   /** 最大スクロール速度（px/frame） */
   private static readonly SCROLL_MAX_SPEED = 12;
-  /** ダブルタップ判定時間（ms） */
-  private static readonly DOUBLE_TAP_MS = 300;
-  /** ダブルタップ判定距離（px）: この範囲内の2回タップをダブルタップとみなす */
-  private static readonly DOUBLE_TAP_PX = 40;
-  /** ハンドル自動非表示までの時間（ms） */
-  private static readonly HANDLE_HIDE_DELAY = 3000;
 
   // ドラッグソースを示す CSS class の付与先
   private sourceLines: HTMLElement[] = [];
@@ -51,16 +45,9 @@ class TouchReorderPlugin {
   /** ドラッグハンドル要素（左・右） */
   private handles: HTMLElement[] = [];
 
-  /** ダブルタップ検出用 */
-  private lastTapTime = 0;
-  private lastTapClientX = 0;
-  private lastTapClientY = 0;
-  private tapMoved = false;
   private touchStartedOnHandle = false;
   /** ハンドル表示中のドキュメント位置（null = 非表示） */
   private activePos: number | null = null;
-  /** ハンドル自動非表示タイマー */
-  private handleHideTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private view: EditorView, getSettings: () => TouchReorderSettings) {
     this.getSettings = getSettings;
@@ -69,32 +56,31 @@ class TouchReorderPlugin {
     // touchstart も passive: false にして、ドラッグ開始時にテキスト選択を抑止する
     this.view.dom.addEventListener('touchstart', this.onTouchStart, { passive: false });
     this.view.dom.addEventListener('touchmove', this.onTouchMove, { passive: false });
-    this.view.dom.addEventListener('touchend', this.onTouchEnd, { passive: false });
+    this.view.dom.addEventListener('touchend', this.onTouchEnd, { passive: true });
     this.view.dom.addEventListener('touchcancel', this.onTouchCancel, { passive: true });
+    this.view.dom.addEventListener('focusin', this.onFocusIn);
+    this.view.dom.addEventListener('focusout', this.onFocusOut);
     this.createHandle();
-    // ハンドルはダブルタップまで非表示
+    requestAnimationFrame(() => this.syncHandleToSelection());
   }
 
   update(update: ViewUpdate) {
     this.settings = this.getSettings();
-    if (update.docChanged && this.activePos !== null) {
-      // テキスト編集が行われたらハンドルを隠す
-      this.hideHandles();
-    } else if (update.geometryChanged && this.activePos !== null) {
-      // レイアウト変更時だけ位置を再計算
-      this.updateHandlePosition();
+    if (update.selectionSet || update.geometryChanged || update.docChanged) {
+      this.syncHandleToSelection();
     }
   }
 
   destroy() {
     this.cancelDrag();
-    this.clearHandleHideTimer();
     this.handles.forEach(h => h.remove());
     this.handles = [];
     this.view.dom.removeEventListener('touchstart', this.onTouchStart);
     this.view.dom.removeEventListener('touchmove', this.onTouchMove);
     this.view.dom.removeEventListener('touchend', this.onTouchEnd);
     this.view.dom.removeEventListener('touchcancel', this.onTouchCancel);
+    this.view.dom.removeEventListener('focusin', this.onFocusIn);
+    this.view.dom.removeEventListener('focusout', this.onFocusOut);
   }
 
   // ──────────── ドラッグハンドル ────────────
@@ -127,21 +113,22 @@ class TouchReorderPlugin {
     });
   }
 
-  private showHandlesAt(pos: number) {
-    this.clearHandleHideTimer();
-    this.activePos = pos;
+  private syncHandleToSelection(retry = true) {
+    if (this.drag) return;
+    if (!this.view.hasFocus) {
+      this.hideHandles();
+      return;
+    }
 
+    this.activePos = this.view.state.selection.main.head;
     this.updateHandlePosition();
-    requestAnimationFrame(() => this.updateHandlePosition());
 
-    this.handleHideTimer = setTimeout(
-      () => this.hideHandles(),
-      TouchReorderPlugin.HANDLE_HIDE_DELAY,
-    );
+    if (retry && this.activePos !== null) {
+      requestAnimationFrame(() => this.syncHandleToSelection(false));
+    }
   }
 
   private hideHandles() {
-    this.clearHandleHideTimer();
     this.activePos = null;
     this.handles.forEach(h => {
       h.style.opacity = '0';
@@ -149,12 +136,13 @@ class TouchReorderPlugin {
     });
   }
 
-  private clearHandleHideTimer() {
-    if (this.handleHideTimer) {
-      clearTimeout(this.handleHideTimer);
-      this.handleHideTimer = null;
-    }
-  }
+  private onFocusIn = () => {
+    requestAnimationFrame(() => this.syncHandleToSelection());
+  };
+
+  private onFocusOut = () => {
+    this.hideHandles();
+  };
 
   // ──────────── touchstart ────────────
 
@@ -166,7 +154,6 @@ class TouchReorderPlugin {
 
     this.startX = touch.clientX;
     this.startY = touch.clientY;
-    this.tapMoved = false;
     this.touchStartedOnHandle =
       this.handles.length > 0 && this.handles.some(h => target === h || h.contains(target));
 
@@ -184,14 +171,6 @@ class TouchReorderPlugin {
 
   private onTouchMove = (e: TouchEvent) => {
     const touch = e.touches[0];
-
-    if (!this.drag) {
-      const dx = touch.clientX - this.startX;
-      const dy = touch.clientY - this.startY;
-      if (Math.sqrt(dx * dx + dy * dy) > this.settings.moveCancelPx) {
-        this.tapMoved = true;
-      }
-    }
 
     // 長押し判定中にある程度動いた → キャンセル（通常のスクロール）
     if (this.longPressTimer && !this.drag) {
@@ -219,13 +198,10 @@ class TouchReorderPlugin {
 
   // ──────────── touchend ────────────
 
-  private onTouchEnd = (e: TouchEvent) => {
-    const touch = e.changedTouches[0];
+  private onTouchEnd = (_e: TouchEvent) => {
     const startedOnHandle = this.touchStartedOnHandle;
-    const tapMoved = this.tapMoved;
 
     this.touchStartedOnHandle = false;
-    this.tapMoved = false;
     this.clearTimer();
 
     if (this.drag) {
@@ -240,33 +216,9 @@ class TouchReorderPlugin {
       return;
     }
 
-    if (startedOnHandle || tapMoved || !touch) return;
+    if (startedOnHandle) return;
 
-    const now = Date.now();
-    const dx = Math.abs(touch.clientX - this.lastTapClientX);
-    const dy = Math.abs(touch.clientY - this.lastTapClientY);
-    const dt = now - this.lastTapTime;
-    const isDoubleTap =
-      dt < TouchReorderPlugin.DOUBLE_TAP_MS
-      && dx < TouchReorderPlugin.DOUBLE_TAP_PX
-      && dy < TouchReorderPlugin.DOUBLE_TAP_PX;
-
-    this.lastTapTime = now;
-    this.lastTapClientX = touch.clientX;
-    this.lastTapClientY = touch.clientY;
-
-    if (isDoubleTap) {
-      e.preventDefault();
-      const pos = this.view.posAtCoords({ x: touch.clientX, y: touch.clientY });
-      if (pos != null) {
-        this.showHandlesAt(pos);
-      }
-      return;
-    }
-
-    if (this.activePos !== null) {
-      this.hideHandles();
-    }
+    requestAnimationFrame(() => this.syncHandleToSelection());
   };
 
   // ──────────── touchcancel ────────────
@@ -515,8 +467,7 @@ class TouchReorderPlugin {
     this.view.dom.style.userSelect = '';
     this.view.dom.style.webkitUserSelect = '';
 
-    // ドラッグ完了後はハンドルを隠す
-    this.hideHandles();
+    this.syncHandleToSelection();
   }
 
   private cancelDrag() {
