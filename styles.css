@@ -40,7 +40,18 @@
   right: 2px;
 }
 
-/* ドロップ先ガイドライン */
+/* ドロップ先ゾーン（行全体の背景ハイライト） */
+.touch-reorder-drop-zone {
+  position: absolute;
+  pointer-events: none;
+  z-index: 99;
+  background-color: rgba(var(--color-accent-rgb, 66, 135, 245), 0.12);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 2px;
+  transition: top 0.08s ease, height 0.08s ease;
+}
+
+/* ドロップ先ガイドライン（2px 線） */
 .touch-reorder-drop-indicator {
   position: absolute;
   height: 2px;

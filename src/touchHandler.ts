@@ -9,8 +9,10 @@ import type { TextBlock, MoveUnit, TouchReorderSettings } from './types';
 interface DragState {
   /** ドラッグ対象のブロック（元の位置情報） */
   block: TextBlock;
-  /** ドロップ先ガイドライン要素 */
+  /** ドロップ先ガイドライン（2px 線） */
   indicator: HTMLElement;
+  /** ドロップ先ハイライトゾーン（行全体の背景） */
+  indicatorZone: HTMLElement;
   /** 現在のドロップ先ドキュメント位置 */
   dropPos: number | null;
 }
@@ -212,11 +214,15 @@ class TouchReorderPlugin {
     }
 
     // ドロップインジケーター生成
+    const indicatorZone = document.createElement('div');
+    indicatorZone.className = 'touch-reorder-drop-zone';
+    this.view.dom.appendChild(indicatorZone);
+
     const indicator = document.createElement('div');
     indicator.className = 'touch-reorder-drop-indicator';
     this.view.dom.appendChild(indicator);
 
-    this.drag = { block, indicator, dropPos: null };
+    this.drag = { block, indicator, indicatorZone, dropPos: null };
 
     // ドラッグ中はハンドルを非表示
     this.handles.forEach(h => {
@@ -253,9 +259,19 @@ class TouchReorderPlugin {
     if (!coords) return;
 
     const editorRect = this.view.dom.getBoundingClientRect();
-    this.drag.indicator.style.top = `${coords.top - editorRect.top}px`;
+    const top = coords.top - editorRect.top;
+    const height = coords.bottom - coords.top;
+
+    // 2px ライン
+    this.drag.indicator.style.top = `${top}px`;
     this.drag.indicator.style.left = '0';
     this.drag.indicator.style.width = '100%';
+
+    // 行全体の背景ゾーン
+    this.drag.indicatorZone.style.top = `${top}px`;
+    this.drag.indicatorZone.style.height = `${height}px`;
+    this.drag.indicatorZone.style.left = '0';
+    this.drag.indicatorZone.style.width = '100%';
   }
 
   // ──────────── テキスト移動 ────────────
@@ -409,6 +425,7 @@ class TouchReorderPlugin {
 
     if (this.drag) {
       this.drag.indicator.remove();
+      this.drag.indicatorZone.remove();
       this.drag = null;
     }
     this.removeSourceHighlight();

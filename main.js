@@ -273,10 +273,13 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     if (this.settings.vibration && navigator.vibrate) {
       navigator.vibrate(50);
     }
+    const indicatorZone = document.createElement("div");
+    indicatorZone.className = "touch-reorder-drop-zone";
+    this.view.dom.appendChild(indicatorZone);
     const indicator = document.createElement("div");
     indicator.className = "touch-reorder-drop-indicator";
     this.view.dom.appendChild(indicator);
-    this.drag = { block, indicator, dropPos: null };
+    this.drag = { block, indicator, indicatorZone, dropPos: null };
     this.handles.forEach((h) => {
       h.style.opacity = "0";
       h.style.pointerEvents = "none";
@@ -305,9 +308,15 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     if (!coords)
       return;
     const editorRect = this.view.dom.getBoundingClientRect();
-    this.drag.indicator.style.top = `${coords.top - editorRect.top}px`;
+    const top = coords.top - editorRect.top;
+    const height = coords.bottom - coords.top;
+    this.drag.indicator.style.top = `${top}px`;
     this.drag.indicator.style.left = "0";
     this.drag.indicator.style.width = "100%";
+    this.drag.indicatorZone.style.top = `${top}px`;
+    this.drag.indicatorZone.style.height = `${height}px`;
+    this.drag.indicatorZone.style.left = "0";
+    this.drag.indicatorZone.style.width = "100%";
   }
   // ──────────── テキスト移動 ────────────
   moveBlock(block, dropPos) {
@@ -423,6 +432,7 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     this.stopAutoScroll();
     if (this.drag) {
       this.drag.indicator.remove();
+      this.drag.indicatorZone.remove();
       this.drag = null;
     }
     this.removeSourceHighlight();
