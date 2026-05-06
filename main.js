@@ -148,24 +148,44 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     this.sourceLines = [];
     /** ドラッグハンドル要素（左・右） */
     this.handles = [];
-    this.onFocusIn = () => {
-      requestAnimationFrame(() => this.updateHandlePosition());
-    };
+    /** ダブルタップ検出用 */
+    this.lastTapTime = 0;
+    this.lastTapClientY = 0;
+    /** ハンドル表示中のドキュメント位置（null = 非表示） */
+    this.activePos = null;
+    /** ハンドル自動非表示タイマー */
+    this.handleHideTimer = null;
     // ──────────── touchstart ────────────
     this.onTouchStart = (e) => {
       if (e.touches.length !== 1)
         return;
       const target = e.target;
-      if (!this.handles.length || !this.handles.some((h) => target === h || h.contains(target)))
-        return;
-      e.preventDefault();
       const touch = e.touches[0];
-      this.startX = touch.clientX;
-      this.startY = touch.clientY;
-      const cursorPos = this.view.state.selection.main.head;
-      this.longPressTimer = setTimeout(() => {
-        this.startDrag(cursorPos);
-      }, this.settings.longPressMs);
+      if (this.handles.length && this.handles.some((h) => target === h || h.contains(target))) {
+        e.preventDefault();
+        this.startX = touch.clientX;
+        this.startY = touch.clientY;
+        const pos = this.activePos ?? this.view.state.selection.main.head;
+        this.longPressTimer = setTimeout(() => {
+          this.startDrag(pos);
+        }, this.settings.longPressMs);
+        return;
+      }
+      const now = Date.now();
+      const dy = Math.abs(touch.clientY - this.lastTapClientY);
+      const dt = now - this.lastTapTime;
+      const isDoubleTap = dt < _TouchReorderPlugin.DOUBLE_TAP_MS && dy < _TouchReorderPlugin.DOUBLE_TAP_PX;
+      this.lastTapTime = now;
+      this.lastTapClientY = touch.clientY;
+      if (isDoubleTap) {
+        e.preventDefault();
+        const pos = this.view.posAtCoords({ x: touch.clientX, y: touch.clientY });
+        if (pos != null) {
+          this.showHandlesAt(pos);
+        }
+      } else if (this.activePos !== null) {
+        this.hideHandles();
+      }
     };
     // ──────────── touchmove ────────────
     this.onTouchMove = (e) => {
@@ -208,25 +228,25 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     this.view.dom.addEventListener("touchmove", this.onTouchMove, { passive: false });
     this.view.dom.addEventListener("touchend", this.onTouchEnd, { passive: true });
     this.view.dom.addEventListener("touchcancel", this.onTouchCancel, { passive: true });
-    this.view.dom.addEventListener("focusin", this.onFocusIn);
     this.createHandle();
-    requestAnimationFrame(() => this.updateHandlePosition());
   }
   update(update) {
     this.settings = this.getSettings();
-    if (update.selectionSet || update.geometryChanged || update.docChanged) {
+    if (update.docChanged && this.activePos !== null) {
+      this.hideHandles();
+    } else if (update.geometryChanged && this.activePos !== null) {
       this.updateHandlePosition();
     }
   }
   destroy() {
     this.cancelDrag();
+    this.clearHandleHideTimer();
     this.handles.forEach((h) => h.remove());
     this.handles = [];
     this.view.dom.removeEventListener("touchstart", this.onTouchStart);
     this.view.dom.removeEventListener("touchmove", this.onTouchMove);
     this.view.dom.removeEventListener("touchend", this.onTouchEnd);
     this.view.dom.removeEventListener("touchcancel", this.onTouchCancel);
-    this.view.dom.removeEventListener("focusin", this.onFocusIn);
   }
   // ──────────── ドラッグハンドル ────────────
   createHandle() {
@@ -240,24 +260,51 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     };
     this.handles = [makeHandle("left"), makeHandle("right")];
   }
-  updateHandlePosition(retry = true) {
-    if (!this.handles.length || this.drag)
+  updateHandlePosition() {
+    if (!this.handles.length || this.drag || this.activePos === null)
       return;
-    const cursor = this.view.state.selection.main.head;
-    const lineBlock = this.view.lineBlockAt(cursor);
+    const lineBlock = this.view.lineBlockAt(this.activePos);
     const coords = this.view.coordsAtPos(lineBlock.from);
-    if (!coords) {
-      if (retry)
-        requestAnimationFrame(() => this.updateHandlePosition(false));
+    if (!coords)
       return;
-    }
     const editorRect = this.view.dom.getBoundingClientRect();
     this.handles.forEach((h) => {
       h.style.top = `${coords.top - editorRect.top}px`;
       h.style.height = `${lineBlock.height}px`;
-      h.style.opacity = "0.4";
-      h.style.pointerEvents = "auto";
     });
+  }
+  showHandlesAt(pos) {
+    this.clearHandleHideTimer();
+    this.activePos = pos;
+    const lineBlock = this.view.lineBlockAt(pos);
+    const coords = this.view.coordsAtPos(lineBlock.from);
+    const editorRect = this.view.dom.getBoundingClientRect();
+    if (coords) {
+      this.handles.forEach((h) => {
+        h.style.top = `${coords.top - editorRect.top}px`;
+        h.style.height = `${lineBlock.height}px`;
+        h.style.opacity = "0.6";
+        h.style.pointerEvents = "auto";
+      });
+    }
+    this.handleHideTimer = setTimeout(
+      () => this.hideHandles(),
+      _TouchReorderPlugin.HANDLE_HIDE_DELAY
+    );
+  }
+  hideHandles() {
+    this.clearHandleHideTimer();
+    this.activePos = null;
+    this.handles.forEach((h) => {
+      h.style.opacity = "0";
+      h.style.pointerEvents = "none";
+    });
+  }
+  clearHandleHideTimer() {
+    if (this.handleHideTimer) {
+      clearTimeout(this.handleHideTimer);
+      this.handleHideTimer = null;
+    }
   }
   // ──────────── ドラッグ開始 ────────────
   startDrag(pos) {
@@ -438,7 +485,7 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     this.removeSourceHighlight();
     this.view.dom.style.userSelect = "";
     this.view.dom.style.webkitUserSelect = "";
-    this.updateHandlePosition();
+    this.hideHandles();
   }
   cancelDrag() {
     this.clearTimer();
@@ -449,6 +496,12 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
 _TouchReorderPlugin.SCROLL_EDGE = 60;
 /** 最大スクロール速度（px/frame） */
 _TouchReorderPlugin.SCROLL_MAX_SPEED = 12;
+/** ダブルタップ判定時間（ms） */
+_TouchReorderPlugin.DOUBLE_TAP_MS = 300;
+/** ダブルタップ判定距離（px）: この範囲内の2回タップをダブルタップとみなす */
+_TouchReorderPlugin.DOUBLE_TAP_PX = 40;
+/** ハンドル自動非表示までの時間（ms） */
+_TouchReorderPlugin.HANDLE_HIDE_DELAY = 3e3;
 var TouchReorderPlugin = _TouchReorderPlugin;
 function createTouchExtension(getSettings) {
   return import_view.ViewPlugin.define(
