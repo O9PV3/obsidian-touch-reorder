@@ -150,7 +150,10 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     this.handles = [];
     /** ダブルタップ検出用 */
     this.lastTapTime = 0;
+    this.lastTapClientX = 0;
     this.lastTapClientY = 0;
+    this.tapMoved = false;
+    this.touchStartedOnHandle = false;
     /** ハンドル表示中のドキュメント位置（null = 非表示） */
     this.activePos = null;
     /** ハンドル自動非表示タイマー */
@@ -161,35 +164,28 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
         return;
       const target = e.target;
       const touch = e.touches[0];
-      if (this.handles.length && this.handles.some((h) => target === h || h.contains(target))) {
+      this.startX = touch.clientX;
+      this.startY = touch.clientY;
+      this.tapMoved = false;
+      this.touchStartedOnHandle = this.handles.length > 0 && this.handles.some((h) => target === h || h.contains(target));
+      if (this.touchStartedOnHandle) {
         e.preventDefault();
-        this.startX = touch.clientX;
-        this.startY = touch.clientY;
         const pos = this.activePos ?? this.view.state.selection.main.head;
         this.longPressTimer = setTimeout(() => {
           this.startDrag(pos);
         }, this.settings.longPressMs);
-        return;
-      }
-      const now = Date.now();
-      const dy = Math.abs(touch.clientY - this.lastTapClientY);
-      const dt = now - this.lastTapTime;
-      const isDoubleTap = dt < _TouchReorderPlugin.DOUBLE_TAP_MS && dy < _TouchReorderPlugin.DOUBLE_TAP_PX;
-      this.lastTapTime = now;
-      this.lastTapClientY = touch.clientY;
-      if (isDoubleTap) {
-        e.preventDefault();
-        const pos = this.view.posAtCoords({ x: touch.clientX, y: touch.clientY });
-        if (pos != null) {
-          this.showHandlesAt(pos);
-        }
-      } else if (this.activePos !== null) {
-        this.hideHandles();
       }
     };
     // ──────────── touchmove ────────────
     this.onTouchMove = (e) => {
       const touch = e.touches[0];
+      if (!this.drag) {
+        const dx = touch.clientX - this.startX;
+        const dy = touch.clientY - this.startY;
+        if (Math.sqrt(dx * dx + dy * dy) > this.settings.moveCancelPx) {
+          this.tapMoved = true;
+        }
+      }
       if (this.longPressTimer && !this.drag) {
         const dx = touch.clientX - this.startX;
         const dy = touch.clientY - this.startY;
@@ -206,17 +202,44 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
       this.startAutoScroll();
     };
     // ──────────── touchend ────────────
-    this.onTouchEnd = (_e) => {
+    this.onTouchEnd = (e) => {
+      const touch = e.changedTouches[0];
+      const startedOnHandle = this.touchStartedOnHandle;
+      const tapMoved = this.tapMoved;
+      this.touchStartedOnHandle = false;
+      this.tapMoved = false;
       this.clearTimer();
-      if (!this.drag)
+      if (this.drag) {
+        const { block, dropPos } = this.drag;
+        this.cleanupDrag();
+        if (dropPos == null)
+          return;
+        if (dropPos >= block.from && dropPos <= block.to)
+          return;
+        this.moveBlock(block, dropPos);
         return;
-      const { block, dropPos } = this.drag;
-      this.cleanupDrag();
-      if (dropPos == null)
+      }
+      if (startedOnHandle || tapMoved || !touch)
         return;
-      if (dropPos >= block.from && dropPos <= block.to)
+      const now = Date.now();
+      const dx = Math.abs(touch.clientX - this.lastTapClientX);
+      const dy = Math.abs(touch.clientY - this.lastTapClientY);
+      const dt = now - this.lastTapTime;
+      const isDoubleTap = dt < _TouchReorderPlugin.DOUBLE_TAP_MS && dx < _TouchReorderPlugin.DOUBLE_TAP_PX && dy < _TouchReorderPlugin.DOUBLE_TAP_PX;
+      this.lastTapTime = now;
+      this.lastTapClientX = touch.clientX;
+      this.lastTapClientY = touch.clientY;
+      if (isDoubleTap) {
+        e.preventDefault();
+        const pos = this.view.posAtCoords({ x: touch.clientX, y: touch.clientY });
+        if (pos != null) {
+          this.showHandlesAt(pos);
+        }
         return;
-      this.moveBlock(block, dropPos);
+      }
+      if (this.activePos !== null) {
+        this.hideHandles();
+      }
     };
     // ──────────── touchcancel ────────────
     this.onTouchCancel = () => {
@@ -226,7 +249,7 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     this.settings = getSettings();
     this.view.dom.addEventListener("touchstart", this.onTouchStart, { passive: false });
     this.view.dom.addEventListener("touchmove", this.onTouchMove, { passive: false });
-    this.view.dom.addEventListener("touchend", this.onTouchEnd, { passive: true });
+    this.view.dom.addEventListener("touchend", this.onTouchEnd, { passive: false });
     this.view.dom.addEventListener("touchcancel", this.onTouchCancel, { passive: true });
     this.createHandle();
   }
@@ -271,22 +294,15 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     this.handles.forEach((h) => {
       h.style.top = `${coords.top - editorRect.top}px`;
       h.style.height = `${lineBlock.height}px`;
+      h.style.opacity = "0.6";
+      h.style.pointerEvents = "auto";
     });
   }
   showHandlesAt(pos) {
     this.clearHandleHideTimer();
     this.activePos = pos;
-    const lineBlock = this.view.lineBlockAt(pos);
-    const coords = this.view.coordsAtPos(lineBlock.from);
-    const editorRect = this.view.dom.getBoundingClientRect();
-    if (coords) {
-      this.handles.forEach((h) => {
-        h.style.top = `${coords.top - editorRect.top}px`;
-        h.style.height = `${lineBlock.height}px`;
-        h.style.opacity = "0.6";
-        h.style.pointerEvents = "auto";
-      });
-    }
+    this.updateHandlePosition();
+    requestAnimationFrame(() => this.updateHandlePosition());
     this.handleHideTimer = setTimeout(
       () => this.hideHandles(),
       _TouchReorderPlugin.HANDLE_HIDE_DELAY

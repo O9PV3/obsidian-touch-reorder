@@ -1,7 +1,7 @@
 {
   "id": "obsidian-touch-reorder",
   "name": "Touch Reorder",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "minAppVersion": "1.0.0",
   "description": "Drag-and-drop reordering of text blocks via long-press on mobile.",
   "author": "O9PV3",

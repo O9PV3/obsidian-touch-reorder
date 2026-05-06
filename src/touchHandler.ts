@@ -53,7 +53,10 @@ class TouchReorderPlugin {
 
   /** ダブルタップ検出用 */
   private lastTapTime = 0;
+  private lastTapClientX = 0;
   private lastTapClientY = 0;
+  private tapMoved = false;
+  private touchStartedOnHandle = false;
   /** ハンドル表示中のドキュメント位置（null = 非表示） */
   private activePos: number | null = null;
   /** ハンドル自動非表示タイマー */
@@ -66,7 +69,7 @@ class TouchReorderPlugin {
     // touchstart も passive: false にして、ドラッグ開始時にテキスト選択を抑止する
     this.view.dom.addEventListener('touchstart', this.onTouchStart, { passive: false });
     this.view.dom.addEventListener('touchmove', this.onTouchMove, { passive: false });
-    this.view.dom.addEventListener('touchend', this.onTouchEnd, { passive: true });
+    this.view.dom.addEventListener('touchend', this.onTouchEnd, { passive: false });
     this.view.dom.addEventListener('touchcancel', this.onTouchCancel, { passive: true });
     this.createHandle();
     // ハンドルはダブルタップまで非表示
@@ -119,6 +122,8 @@ class TouchReorderPlugin {
     this.handles.forEach(h => {
       h.style.top = `${coords.top - editorRect.top}px`;
       h.style.height = `${lineBlock.height}px`;
+      h.style.opacity = '0.6';
+      h.style.pointerEvents = 'auto';
     });
   }
 
@@ -126,18 +131,8 @@ class TouchReorderPlugin {
     this.clearHandleHideTimer();
     this.activePos = pos;
 
-    const lineBlock = this.view.lineBlockAt(pos);
-    const coords = this.view.coordsAtPos(lineBlock.from);
-    const editorRect = this.view.dom.getBoundingClientRect();
-
-    if (coords) {
-      this.handles.forEach(h => {
-        h.style.top = `${coords.top - editorRect.top}px`;
-        h.style.height = `${lineBlock.height}px`;
-        h.style.opacity = '0.6';
-        h.style.pointerEvents = 'auto';
-      });
-    }
+    this.updateHandlePosition();
+    requestAnimationFrame(() => this.updateHandlePosition());
 
     this.handleHideTimer = setTimeout(
       () => this.hideHandles(),
@@ -169,38 +164,19 @@ class TouchReorderPlugin {
     const target = e.target as HTMLElement;
     const touch = e.touches[0];
 
+    this.startX = touch.clientX;
+    this.startY = touch.clientY;
+    this.tapMoved = false;
+    this.touchStartedOnHandle =
+      this.handles.length > 0 && this.handles.some(h => target === h || h.contains(target));
+
     // ── ハンドルへのタッチ: 長押しでドラッグ開始 ──
-    if (this.handles.length && this.handles.some(h => target === h || h.contains(target))) {
+    if (this.touchStartedOnHandle) {
       e.preventDefault();
-      this.startX = touch.clientX;
-      this.startY = touch.clientY;
       const pos = this.activePos ?? this.view.state.selection.main.head;
       this.longPressTimer = setTimeout(() => {
         this.startDrag(pos);
       }, this.settings.longPressMs);
-      return;
-    }
-
-    // ── テキストエリアへのダブルタップ検出 ──
-    const now = Date.now();
-    const dy = Math.abs(touch.clientY - this.lastTapClientY);
-    const dt = now - this.lastTapTime;
-    const isDoubleTap =
-      dt < TouchReorderPlugin.DOUBLE_TAP_MS && dy < TouchReorderPlugin.DOUBLE_TAP_PX;
-
-    this.lastTapTime = now;
-    this.lastTapClientY = touch.clientY;
-
-    if (isDoubleTap) {
-      // ダブルタップ: その行にハンドルを表示
-      e.preventDefault();
-      const pos = this.view.posAtCoords({ x: touch.clientX, y: touch.clientY });
-      if (pos != null) {
-        this.showHandlesAt(pos);
-      }
-    } else if (this.activePos !== null) {
-      // シングルタップ (別の場所): ハンドルを隠す
-      this.hideHandles();
     }
   };
 
@@ -208,6 +184,14 @@ class TouchReorderPlugin {
 
   private onTouchMove = (e: TouchEvent) => {
     const touch = e.touches[0];
+
+    if (!this.drag) {
+      const dx = touch.clientX - this.startX;
+      const dy = touch.clientY - this.startY;
+      if (Math.sqrt(dx * dx + dy * dy) > this.settings.moveCancelPx) {
+        this.tapMoved = true;
+      }
+    }
 
     // 長押し判定中にある程度動いた → キャンセル（通常のスクロール）
     if (this.longPressTimer && !this.drag) {
@@ -235,19 +219,54 @@ class TouchReorderPlugin {
 
   // ──────────── touchend ────────────
 
-  private onTouchEnd = (_e: TouchEvent) => {
+  private onTouchEnd = (e: TouchEvent) => {
+    const touch = e.changedTouches[0];
+    const startedOnHandle = this.touchStartedOnHandle;
+    const tapMoved = this.tapMoved;
+
+    this.touchStartedOnHandle = false;
+    this.tapMoved = false;
     this.clearTimer();
 
-    if (!this.drag) return;
+    if (this.drag) {
+      const { block, dropPos } = this.drag;
+      this.cleanupDrag();
 
-    const { block, dropPos } = this.drag;
-    this.cleanupDrag();
+      if (dropPos == null) return;
+      // 自分自身の範囲内にドロップ → 何もしない
+      if (dropPos >= block.from && dropPos <= block.to) return;
 
-    if (dropPos == null) return;
-    // 自分自身の範囲内にドロップ → 何もしない
-    if (dropPos >= block.from && dropPos <= block.to) return;
+      this.moveBlock(block, dropPos);
+      return;
+    }
 
-    this.moveBlock(block, dropPos);
+    if (startedOnHandle || tapMoved || !touch) return;
+
+    const now = Date.now();
+    const dx = Math.abs(touch.clientX - this.lastTapClientX);
+    const dy = Math.abs(touch.clientY - this.lastTapClientY);
+    const dt = now - this.lastTapTime;
+    const isDoubleTap =
+      dt < TouchReorderPlugin.DOUBLE_TAP_MS
+      && dx < TouchReorderPlugin.DOUBLE_TAP_PX
+      && dy < TouchReorderPlugin.DOUBLE_TAP_PX;
+
+    this.lastTapTime = now;
+    this.lastTapClientX = touch.clientX;
+    this.lastTapClientY = touch.clientY;
+
+    if (isDoubleTap) {
+      e.preventDefault();
+      const pos = this.view.posAtCoords({ x: touch.clientX, y: touch.clientY });
+      if (pos != null) {
+        this.showHandlesAt(pos);
+      }
+      return;
+    }
+
+    if (this.activePos !== null) {
+      this.hideHandles();
+    }
   };
 
   // ──────────── touchcancel ────────────
