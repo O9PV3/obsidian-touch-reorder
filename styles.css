@@ -1,0 +1,23 @@
+/* ──────────────────────────────────────────
+   Touch Reorder — 視覚フィードバック
+   ────────────────────────────────────────── */
+
+/* ドラッグ中のソースブロック */
+.touch-reorder-drag-source {
+  opacity: 0.7;
+  background-color: rgba(var(--color-accent-rgb, 66, 135, 245), 0.08);
+  border-left: 2px solid var(--color-accent);
+  border-radius: 2px;
+  transition: opacity 0.15s ease;
+}
+
+/* ドロップ先ガイドライン */
+.touch-reorder-drop-indicator {
+  position: absolute;
+  height: 2px;
+  background-color: var(--color-accent);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 100;
+  transition: top 0.08s ease;
+}
