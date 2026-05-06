@@ -58,20 +58,7 @@ export class TouchReorderSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
       );
-    // 掴みエリア幅
-    new Setting(containerEl)
-      .setName('掴みエリア幅 (px)')
-      .setDesc('行頭からこのピクセル数以内のタッチのみドラッグを受け付けます（20〜200px）')
-      .addSlider((slider) =>
-        slider
-          .setLimits(20, 200, 10)
-          .setValue(this.plugin.settings.grabZonePx)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.grabZonePx = value;
-            await this.plugin.saveSettings();
-          }),
-      );
+
     // バイブレーション
     new Setting(containerEl)
       .setName('バイブレーション')

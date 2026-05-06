@@ -19,8 +19,6 @@ export interface TouchReorderSettings {
   longPressMs: number;
   /** 長押し中に指がこのピクセル数以上動いたら掴みをキャンセルする */
   moveCancelPx: number;
-  /** 行頭からこのピクセル数以内のタッチのみ長押しを受け付ける */
-  grabZonePx: number;
   /** バイブレーションの ON/OFF */
   vibration: boolean;
   /** ガイドラインの色（CSS カラー値。空文字の場合はアクセントカラーを使用） */
@@ -32,7 +30,6 @@ export const DEFAULT_SETTINGS: TouchReorderSettings = {
   moveUnit: 'line',
   longPressMs: 300,
   moveCancelPx: 20,
-  grabZonePx: 50,
   vibration: true,
   guidelineColor: '',
 };
