@@ -146,18 +146,22 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     this.lastTouchY = 0;
     // ドラッグソースを示す CSS class の付与先
     this.sourceLines = [];
+    /** ドラッグハンドル要素 */
+    this.handle = null;
     // ──────────── touchstart ────────────
     this.onTouchStart = (e) => {
       if (e.touches.length !== 1)
         return;
+      const target = e.target;
+      if (!this.handle || target !== this.handle && !this.handle.contains(target))
+        return;
+      e.preventDefault();
       const touch = e.touches[0];
       this.startX = touch.clientX;
       this.startY = touch.clientY;
-      const pos = this.view.posAtCoords({ x: touch.clientX, y: touch.clientY });
-      if (pos == null)
-        return;
+      const cursorPos = this.view.state.selection.main.head;
       this.longPressTimer = setTimeout(() => {
-        this.startDrag(pos);
+        this.startDrag(cursorPos);
       }, this.settings.longPressMs);
     };
     // ──────────── touchmove ────────────
@@ -201,16 +205,47 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     this.view.dom.addEventListener("touchmove", this.onTouchMove, { passive: false });
     this.view.dom.addEventListener("touchend", this.onTouchEnd, { passive: true });
     this.view.dom.addEventListener("touchcancel", this.onTouchCancel, { passive: true });
+    this.createHandle();
+    this.updateHandlePosition();
   }
-  update(_update) {
+  update(update) {
     this.settings = this.getSettings();
+    if (update.selectionSet || update.geometryChanged || update.docChanged) {
+      this.updateHandlePosition();
+    }
   }
   destroy() {
     this.cancelDrag();
+    this.handle?.remove();
+    this.handle = null;
     this.view.dom.removeEventListener("touchstart", this.onTouchStart);
     this.view.dom.removeEventListener("touchmove", this.onTouchMove);
     this.view.dom.removeEventListener("touchend", this.onTouchEnd);
     this.view.dom.removeEventListener("touchcancel", this.onTouchCancel);
+  }
+  // ──────────── ドラッグハンドル ────────────
+  createHandle() {
+    const handle = document.createElement("div");
+    handle.className = "touch-reorder-handle";
+    handle.setAttribute("aria-label", "\u884C\u3092\u79FB\u52D5");
+    handle.textContent = "\u283F";
+    this.view.dom.appendChild(handle);
+    this.handle = handle;
+  }
+  updateHandlePosition() {
+    if (!this.handle || this.drag)
+      return;
+    const cursor = this.view.state.selection.main.head;
+    const lineBlock = this.view.lineBlockAt(cursor);
+    const coords = this.view.coordsAtPos(lineBlock.from);
+    if (!coords) {
+      this.handle.style.display = "none";
+      return;
+    }
+    const editorRect = this.view.dom.getBoundingClientRect();
+    this.handle.style.display = "flex";
+    this.handle.style.top = `${coords.top - editorRect.top}px`;
+    this.handle.style.height = `${lineBlock.height}px`;
   }
   // ──────────── ドラッグ開始 ────────────
   startDrag(pos) {
@@ -230,6 +265,8 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     indicator.className = "touch-reorder-drop-indicator";
     this.view.dom.appendChild(indicator);
     this.drag = { block, indicator, dropPos: null };
+    if (this.handle)
+      this.handle.style.display = "none";
     this.addSourceHighlight(block);
   }
   // ──────────── ブロック検出 ────────────
@@ -377,6 +414,7 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     this.removeSourceHighlight();
     this.view.dom.style.userSelect = "";
     this.view.dom.style.webkitUserSelect = "";
+    this.updateHandlePosition();
   }
   cancelDrag() {
     this.clearTimer();

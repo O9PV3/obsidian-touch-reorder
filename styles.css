@@ -11,6 +11,26 @@
   transition: opacity 0.15s ease;
 }
 
+/* ドラッグハンドル */
+.touch-reorder-handle {
+  position: absolute;
+  left: 2px;
+  width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 3px;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  z-index: 50;
+  opacity: 0.4;
+  cursor: grab;
+}
+
 /* ドロップ先ガイドライン */
 .touch-reorder-drop-indicator {
   position: absolute;

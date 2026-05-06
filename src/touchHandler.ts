@@ -40,6 +40,9 @@ class TouchReorderPlugin {
   // ドラッグソースを示す CSS class の付与先
   private sourceLines: HTMLElement[] = [];
 
+  /** ドラッグハンドル要素 */
+  private handle: HTMLElement | null = null;
+
   constructor(private view: EditorView, getSettings: () => TouchReorderSettings) {
     this.getSettings = getSettings;
     this.settings = getSettings();
@@ -49,18 +52,55 @@ class TouchReorderPlugin {
     this.view.dom.addEventListener('touchmove', this.onTouchMove, { passive: false });
     this.view.dom.addEventListener('touchend', this.onTouchEnd, { passive: true });
     this.view.dom.addEventListener('touchcancel', this.onTouchCancel, { passive: true });
+
+    this.createHandle();
+    this.updateHandlePosition();
   }
 
-  update(_update: ViewUpdate) {
+  update(update: ViewUpdate) {
     this.settings = this.getSettings();
+    if (update.selectionSet || update.geometryChanged || update.docChanged) {
+      this.updateHandlePosition();
+    }
   }
 
   destroy() {
     this.cancelDrag();
+    this.handle?.remove();
+    this.handle = null;
     this.view.dom.removeEventListener('touchstart', this.onTouchStart);
     this.view.dom.removeEventListener('touchmove', this.onTouchMove);
     this.view.dom.removeEventListener('touchend', this.onTouchEnd);
     this.view.dom.removeEventListener('touchcancel', this.onTouchCancel);
+  }
+
+  // ──────────── ドラッグハンドル ────────────
+
+  private createHandle() {
+    const handle = document.createElement('div');
+    handle.className = 'touch-reorder-handle';
+    handle.setAttribute('aria-label', '行を移動');
+    handle.textContent = '⠿';
+    this.view.dom.appendChild(handle);
+    this.handle = handle;
+  }
+
+  private updateHandlePosition() {
+    if (!this.handle || this.drag) return;
+
+    const cursor = this.view.state.selection.main.head;
+    const lineBlock = this.view.lineBlockAt(cursor);
+    const coords = this.view.coordsAtPos(lineBlock.from);
+
+    if (!coords) {
+      this.handle.style.display = 'none';
+      return;
+    }
+
+    const editorRect = this.view.dom.getBoundingClientRect();
+    this.handle.style.display = 'flex';
+    this.handle.style.top = `${coords.top - editorRect.top}px`;
+    this.handle.style.height = `${lineBlock.height}px`;
   }
 
   // ──────────── touchstart ────────────
@@ -68,15 +108,21 @@ class TouchReorderPlugin {
   private onTouchStart = (e: TouchEvent) => {
     if (e.touches.length !== 1) return;
 
+    // ドラッグハンドル以外のタッチは無視
+    const target = e.target as HTMLElement;
+    if (!this.handle || (target !== this.handle && !this.handle.contains(target))) return;
+
+    e.preventDefault();
+
     const touch = e.touches[0];
     this.startX = touch.clientX;
     this.startY = touch.clientY;
 
-    const pos = this.view.posAtCoords({ x: touch.clientX, y: touch.clientY });
-    if (pos == null) return;
+    // ハンドルはカーソル行に表示されているのでカーソル位置のブロックを使用
+    const cursorPos = this.view.state.selection.main.head;
 
     this.longPressTimer = setTimeout(() => {
-      this.startDrag(pos);
+      this.startDrag(cursorPos);
     }, this.settings.longPressMs);
   };
 
@@ -157,6 +203,9 @@ class TouchReorderPlugin {
     this.view.dom.appendChild(indicator);
 
     this.drag = { block, indicator, dropPos: null };
+
+    // ドラッグ中はハンドルを非表示
+    if (this.handle) this.handle.style.display = 'none';
 
     // ソースブロックに半透明クラスを付与
     this.addSourceHighlight(block);
@@ -350,6 +399,9 @@ class TouchReorderPlugin {
     // ★ テキスト選択の抑止を解除
     this.view.dom.style.userSelect = '';
     this.view.dom.style.webkitUserSelect = '';
+
+    // ハンドル位置を再計算して表示
+    this.updateHandlePosition();
   }
 
   private cancelDrag() {
