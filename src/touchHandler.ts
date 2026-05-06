@@ -75,6 +75,11 @@ class TouchReorderPlugin {
     const pos = this.view.posAtCoords({ x: touch.clientX, y: touch.clientY });
     if (pos == null) return;
 
+    // 行頭から grabZonePx 以内のタッチのみ受け付ける
+    const lineBlock = this.view.lineBlockAt(pos);
+    const lineStartCoords = this.view.coordsAtPos(lineBlock.from);
+    if (lineStartCoords && (touch.clientX - lineStartCoords.left) > this.settings.grabZonePx) return;
+
     this.longPressTimer = setTimeout(() => {
       this.startDrag(pos);
     }, this.settings.longPressMs);

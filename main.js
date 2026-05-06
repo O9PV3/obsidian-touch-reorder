@@ -156,6 +156,10 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
       const pos = this.view.posAtCoords({ x: touch.clientX, y: touch.clientY });
       if (pos == null)
         return;
+      const lineBlock = this.view.lineBlockAt(pos);
+      const lineStartCoords = this.view.coordsAtPos(lineBlock.from);
+      if (lineStartCoords && touch.clientX - lineStartCoords.left > this.settings.grabZonePx)
+        return;
       this.longPressTimer = setTimeout(() => {
         this.startDrag(pos);
       }, this.settings.longPressMs);
@@ -423,6 +427,12 @@ var TouchReorderSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("\u63B4\u307F\u30A8\u30EA\u30A2\u5E45 (px)").setDesc("\u884C\u982D\u304B\u3089\u3053\u306E\u30D4\u30AF\u30BB\u30EB\u6570\u4EE5\u5185\u306E\u30BF\u30C3\u30C1\u306E\u307F\u30C9\u30E9\u30C3\u30B0\u3092\u53D7\u3051\u4ED8\u3051\u307E\u3059\uFF0820\u301C200px\uFF09").addSlider(
+      (slider) => slider.setLimits(20, 200, 10).setValue(this.plugin.settings.grabZonePx).setDynamicTooltip().onChange(async (value) => {
+        this.plugin.settings.grabZonePx = value;
+        await this.plugin.saveSettings();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("\u30D0\u30A4\u30D6\u30EC\u30FC\u30B7\u30E7\u30F3").setDesc("\u30C9\u30E9\u30C3\u30B0\u958B\u59CB\u6642\u306B\u7AEF\u672B\u3092\u632F\u52D5\u3055\u305B\u307E\u3059\uFF08\u5BFE\u5FDC\u7AEF\u672B\u306E\u307F\uFF09\u3002").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.vibration).onChange(async (value) => {
         this.plugin.settings.vibration = value;
@@ -443,6 +453,7 @@ var DEFAULT_SETTINGS = {
   moveUnit: "line",
   longPressMs: 300,
   moveCancelPx: 20,
+  grabZonePx: 50,
   vibration: true,
   guidelineColor: ""
 };
