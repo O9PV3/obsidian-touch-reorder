@@ -52,9 +52,11 @@ class TouchReorderPlugin {
     this.view.dom.addEventListener('touchmove', this.onTouchMove, { passive: false });
     this.view.dom.addEventListener('touchend', this.onTouchEnd, { passive: true });
     this.view.dom.addEventListener('touchcancel', this.onTouchCancel, { passive: true });
+    this.view.dom.addEventListener('focusin', this.onFocusIn);
 
     this.createHandle();
-    this.updateHandlePosition();
+    // DOM レイアウト確定後に位置計算するため rAF で遅延
+    requestAnimationFrame(() => this.updateHandlePosition());
   }
 
   update(update: ViewUpdate) {
@@ -72,6 +74,7 @@ class TouchReorderPlugin {
     this.view.dom.removeEventListener('touchmove', this.onTouchMove);
     this.view.dom.removeEventListener('touchend', this.onTouchEnd);
     this.view.dom.removeEventListener('touchcancel', this.onTouchCancel);
+    this.view.dom.removeEventListener('focusin', this.onFocusIn);
   }
 
   // ──────────── ドラッグハンドル ────────────
@@ -88,7 +91,7 @@ class TouchReorderPlugin {
     this.handles = [makeHandle('left'), makeHandle('right')];
   }
 
-  private updateHandlePosition() {
+  private updateHandlePosition(retry = true) {
     if (!this.handles.length || this.drag) return;
 
     const cursor = this.view.state.selection.main.head;
@@ -96,17 +99,23 @@ class TouchReorderPlugin {
     const coords = this.view.coordsAtPos(lineBlock.from);
 
     if (!coords) {
-      this.handles.forEach(h => (h.style.display = 'none'));
+      // 座標未確定のときは非表示にせず 1フレーム後リトライ
+      if (retry) requestAnimationFrame(() => this.updateHandlePosition(false));
       return;
     }
 
     const editorRect = this.view.dom.getBoundingClientRect();
     this.handles.forEach(h => {
-      h.style.display = 'flex';
       h.style.top = `${coords.top - editorRect.top}px`;
       h.style.height = `${lineBlock.height}px`;
+      h.style.opacity = '0.4';
+      h.style.pointerEvents = 'auto';
     });
   }
+
+  private onFocusIn = () => {
+    requestAnimationFrame(() => this.updateHandlePosition());
+  };
 
   // ──────────── touchstart ────────────
 
@@ -210,7 +219,10 @@ class TouchReorderPlugin {
     this.drag = { block, indicator, dropPos: null };
 
     // ドラッグ中はハンドルを非表示
-    this.handles.forEach(h => (h.style.display = 'none'));
+    this.handles.forEach(h => {
+      h.style.opacity = '0';
+      h.style.pointerEvents = 'none';
+    });
 
     // ソースブロックに半透明クラスを付与
     this.addSourceHighlight(block);

@@ -26,8 +26,10 @@
   -webkit-user-select: none;
   touch-action: none;
   z-index: 50;
-  opacity: 0.4;
+  opacity: 0;
+  pointer-events: none;
   cursor: grab;
+  transition: opacity 0.2s ease;
 }
 
 .touch-reorder-handle--left {
