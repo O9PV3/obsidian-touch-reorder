@@ -146,14 +146,14 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     this.lastTouchY = 0;
     // ドラッグソースを示す CSS class の付与先
     this.sourceLines = [];
-    /** ドラッグハンドル要素 */
-    this.handle = null;
+    /** ドラッグハンドル要素（左・右） */
+    this.handles = [];
     // ──────────── touchstart ────────────
     this.onTouchStart = (e) => {
       if (e.touches.length !== 1)
         return;
       const target = e.target;
-      if (!this.handle || target !== this.handle && !this.handle.contains(target))
+      if (!this.handles.length || !this.handles.some((h) => target === h || h.contains(target)))
         return;
       e.preventDefault();
       const touch = e.touches[0];
@@ -216,8 +216,8 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
   }
   destroy() {
     this.cancelDrag();
-    this.handle?.remove();
-    this.handle = null;
+    this.handles.forEach((h) => h.remove());
+    this.handles = [];
     this.view.dom.removeEventListener("touchstart", this.onTouchStart);
     this.view.dom.removeEventListener("touchmove", this.onTouchMove);
     this.view.dom.removeEventListener("touchend", this.onTouchEnd);
@@ -225,27 +225,32 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
   }
   // ──────────── ドラッグハンドル ────────────
   createHandle() {
-    const handle = document.createElement("div");
-    handle.className = "touch-reorder-handle";
-    handle.setAttribute("aria-label", "\u884C\u3092\u79FB\u52D5");
-    handle.textContent = "\u283F";
-    this.view.dom.appendChild(handle);
-    this.handle = handle;
+    const makeHandle = (side) => {
+      const handle = document.createElement("div");
+      handle.className = `touch-reorder-handle touch-reorder-handle--${side}`;
+      handle.setAttribute("aria-label", "\u884C\u3092\u79FB\u52D5");
+      handle.textContent = "\u283F";
+      this.view.dom.appendChild(handle);
+      return handle;
+    };
+    this.handles = [makeHandle("left"), makeHandle("right")];
   }
   updateHandlePosition() {
-    if (!this.handle || this.drag)
+    if (!this.handles.length || this.drag)
       return;
     const cursor = this.view.state.selection.main.head;
     const lineBlock = this.view.lineBlockAt(cursor);
     const coords = this.view.coordsAtPos(lineBlock.from);
     if (!coords) {
-      this.handle.style.display = "none";
+      this.handles.forEach((h) => h.style.display = "none");
       return;
     }
     const editorRect = this.view.dom.getBoundingClientRect();
-    this.handle.style.display = "flex";
-    this.handle.style.top = `${coords.top - editorRect.top}px`;
-    this.handle.style.height = `${lineBlock.height}px`;
+    this.handles.forEach((h) => {
+      h.style.display = "flex";
+      h.style.top = `${coords.top - editorRect.top}px`;
+      h.style.height = `${lineBlock.height}px`;
+    });
   }
   // ──────────── ドラッグ開始 ────────────
   startDrag(pos) {
@@ -265,8 +270,7 @@ var _TouchReorderPlugin = class _TouchReorderPlugin {
     indicator.className = "touch-reorder-drop-indicator";
     this.view.dom.appendChild(indicator);
     this.drag = { block, indicator, dropPos: null };
-    if (this.handle)
-      this.handle.style.display = "none";
+    this.handles.forEach((h) => h.style.display = "none");
     this.addSourceHighlight(block);
   }
   // ──────────── ブロック検出 ────────────

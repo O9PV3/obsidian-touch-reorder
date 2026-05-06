@@ -11,10 +11,9 @@
   transition: opacity 0.15s ease;
 }
 
-/* ドラッグハンドル */
+/* ドラッグハンドル共通 */
 .touch-reorder-handle {
   position: absolute;
-  left: 2px;
   width: 22px;
   display: flex;
   align-items: center;
@@ -29,6 +28,14 @@
   z-index: 50;
   opacity: 0.4;
   cursor: grab;
+}
+
+.touch-reorder-handle--left {
+  left: 2px;
+}
+
+.touch-reorder-handle--right {
+  right: 2px;
 }
 
 /* ドロップ先ガイドライン */
